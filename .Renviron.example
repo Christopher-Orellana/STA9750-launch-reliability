@@ -1,0 +1,5 @@
+# Optional settings for future download code. No downloader exists yet.
+# Copy to .Renviron locally and restart R. Never commit real credentials.
+LL2_API_KEY=
+# The planned shared datasets use the production API.
+LL2_USE_DEV=false

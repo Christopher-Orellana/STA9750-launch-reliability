@@ -1,0 +1,14 @@
+project:
+  type: default
+  output-dir: docs
+
+format:
+  html:
+    theme: cosmo
+    toc: true
+    code-fold: true
+    embed-resources: true
+
+execute:
+  warning: true
+  message: true
