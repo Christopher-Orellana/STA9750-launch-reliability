@@ -16,7 +16,9 @@ Reliability means successful launches divided by all launches with a success, fa
 4.  Agree as a team on outcome and provider classifications and check data quality.
 5.  Each member uses the shared tables to answer their question, adds their code and Quarto analysis to their own folder, and contributes findings to the group summary.
 
-This repository currently contains the scaffold. Download scripts, datasets, and analyses still need to be built. Verify real API responses before writing extraction code.
+The shared R pipeline is implemented. It downloads production data, preserves the
+original responses, and creates CSVs for the team. A complete source manifest and
+master manifest mark successful runs; sample files are not the finished dataset.
 
 ## Each person's part
 
@@ -37,7 +39,7 @@ Each member can add their own .qmd files and question-specific code within their
 | R/ | Reusable R functions for the whole team. |
 | scripts/ | Shared scripts to download production data and build tables. |
 | data/raw/production/ | Original API responses, separated into launches, agencies, and launcher_configurations. |
-| data/processed/source_tables/ | The three cleaned source tables. |
+| data/processed/source_tables/ | Five source tables, two supporting tables, and download/completion records. |
 | data/processed/combined_launch_tables/ | Joined launch tables for full history and the 2000-2025 study window. |
 | data/processed/question_tables/ | Working tables for each person's question. |
 | analysis/shared_data_quality/ | Checks used by everyone, including missingness and classification checks. |
@@ -48,8 +50,197 @@ Each member can add their own .qmd files and question-specific code within their
 
 - Open launch-reliability.Rproj in RStudio. Use here::here() for paths so code works on other computers.
 - Add your work on a branch and submit a pull request for review.
-- Keep download and table-building steps reproducible in code. Future scripts must create any needed data folders.
-- The entire data/ folder is ignored by Git, including its placeholders. Data stays local and will not accompany a fresh clone. The team still needs to document how everyone obtains the same production snapshot.
+- Keep download and table-building steps reproducible in code. The scripts create needed data folders.
+- The entire data/ folder is ignored by Git, including its placeholders. Christopher will share a dated copy of data/processed/ separately so everyone uses the same snapshot. Keep its manifest files with the CSVs; their checksums identify the exact files.
 - Never commit API keys. Use a local .Renviron file if needed.
 - Report launch counts, missing values, and uncertainty alongside comparisons.
 - Each final individual_report.qmd belongs in that person's STA9750-2026-FALL repository. This repository supports shared team work.
+
+## Running the pipeline
+
+Open launch-reliability.Rproj in RStudio first. Use R 4.1 or newer. The scripts
+install missing packages from CRAN and load them. Internet access is needed for
+package installation and downloading. Joining already-downloaded tables is local.
+
+If using an API key, copy .Renviron.example to .Renviron, add the key locally,
+and leave LL2_USE_DEV=false. Never put a key in R code, a URL, or GitHub. An API key
+is optional. This pipeline refuses development mode to keep the shared snapshot
+strictly production data.
+
+Run these commands in the R console, one after the other:
+
+```r
+# Download all pages and create the seven source/supporting CSVs.
+source("scripts/01_pull_data.R")
+
+# Check and join local CSVs, then create the two master launch tables.
+source("scripts/02_build_master_tables.R")
+```
+
+The two source() paths are relative to the open project. Inside the scripts,
+here::here() constructs project-relative paths. No computer-specific paths are used.
+
+For a small test, use the RStudio Terminal:
+
+```sh
+Rscript scripts/01_pull_data.R --sample
+```
+
+This takes at most one page from each endpoint and writes only to
+data/processed/sample/source_tables/. It does not publish a full-data completion
+marker. The build script refuses incomplete inputs. On systems where Rscript is
+not on PATH, set sample_only to TRUE in script 01 for a test, then restore its
+original expression before the full run.
+
+## Downloads, waiting, and resuming
+
+- One downloader is shared by all five endpoints. Do not run two copies at once.
+- Without a key, it makes at most 15 recorded requests in a rolling hour and waits
+  when that budget is used. HTTP 429 responses can add more waiting if other API
+  use shares your quota. A full download can take several hours.
+- Each successful page is saved as an RDS file containing the original JSON text,
+  its request URL, and its UTC retrieval time. This is a cache, not a flattened CSV.
+- Each endpoint folder in data/raw/production/ has progress.csv with downloaded
+  records, the reported total, and whether pagination finished.
+- Stop with RStudio's Stop button or Ctrl+C in a terminal. Run script 01 again to
+  reuse cached pages and continue. Cached pages do not spend additional API calls.
+- Normal stops release the download lock. After a computer crash, first confirm
+  that no downloader is running, then remove only the folder
+  data/raw/production/download.lock before restarting.
+- A normal rerun reuses the same cached snapshot. It does not refresh it. If a new
+  snapshot is needed, preserve the old data first and coordinate the refresh with
+  the team. Do not mix old and new pages or casually delete request_times.rds,
+  which remembers the recent request budget.
+- The downloader stops on duplicate IDs, changing page totals, unexpected field
+  structures, or repeated pagination links. These require investigation, not
+  silently dropping rows. Fixed ordering and checks help, but the API can still
+  change during a long pull; the cache records when each page was retrieved.
+
+## Endpoints and generated tables
+
+The first three endpoints use mode=detailed and limit=100. The two reference
+endpoints use limit=100. The launch request has no lower date bound and uses
+net__lt=2026-01-01T00:00:00Z, preserving all of December 31, 2025 in UTC. It explicitly
+includes LL2's available suborbital records so the team can decide study scope;
+this does not imply complete coverage of suborbital launches.
+
+All seven files below go in data/processed/source_tables/:
+
+| File | Source | One row represents |
+| --- | --- | --- |
+| launches.csv | /2.3.0/launches/previous/ | One launch with original status, mission, orbit, date precision, and failure text. |
+| agencies.csv | /2.3.0/agencies/ | One agency and its agency-type ID. |
+| launcher_configurations.csv | /2.3.0/launcher_configurations/ | One configuration, including placeholder/reusable flags and maiden-flight date. |
+| launch_statuses.csv | /2.3.0/config/launch_statuses/ | One official status ID, name, and description. |
+| agency_types.csv | /2.3.0/config/agency_types/ | One official agency-type ID and name. |
+| configuration_families.csv | Extracted from configurations | One configuration-to-family relationship; multiple families are preserved. |
+| launch_stage_recovery.csv | Extracted from detailed launches | One recorded stage flight, with booster reuse and landing information. |
+
+Source publication happens only after all endpoints finish and validation passes.
+source_manifest.csv records each output's row count and MD5 checksum.
+download_summary.csv records the requested URLs and pagination completion. These
+small audit files are additional to the nine analysis tables, not new datasets.
+
+Script 02 checks the source checksums and writes these two files in
+data/processed/combined_launch_tables/:
+
+- master_launches_all_history_through_2025.csv: one row per launch in available
+  history, with joined metadata, classifications, and observed experience.
+- master_launches_2000_2025.csv: the study-window subset, created after experience
+  is calculated. Unresolved outcomes remain present with analysis_eligible=FALSE.
+
+master_manifest.csv records their checksums and the source manifest checksum.
+The optional failure_evidence.csv and the five SQ working tables are not created
+by this pipeline. The team will build these when their definitions are agreed.
+
+## Understanding the joins
+
+| Launch/source column | Lookup column | Information added |
+| --- | --- | --- |
+| launches.provider_id | agencies.agency_id | Provider details and agency_type_id. |
+| agencies.agency_type_id | agency_types.agency_type_id | Official agency-type label. |
+| launches.rocket_config_id | launcher_configurations.config_id | Configuration details. |
+| launches.status_id | launch_statuses.status_id | Official outcome label and description. |
+
+The code uses left_join() so unmatched launches are retained. Each lookup must
+have a unique key, and each launch can match at most one lookup row. Duplicate keys
+stop the build; unmatched provider/configuration records are flagged for review.
+The number of rows must stay the same and launch IDs must remain unique.
+
+Families and stages are not automatically joined onto the launch master: multiple
+rows per configuration or launch would inflate launch counts. Join or summarize
+these supporting tables deliberately for the relevant SQ.
+
+## Shared definitions and limitations
+
+- Official Launch Successful maps to success; Launch Failure to failure; Launch
+  was a Partial Failure to partial_failure. Other statuses map to other and are
+  excluded from rates using analysis_eligible. Original labels are retained.
+- Government and Commercial agency labels map to government and commercial.
+  Private, Multinational, Educational, Unknown, and missing types remain unknown.
+  Do not silently combine Private with Commercial. Team-approved provider-ID
+  exceptions belong in sector_overrides in R/classify.R, with a written reason.
+- Sector reflects the downloaded agency snapshot, not reconstructed historical
+  ownership. A government customer does not make its commercial provider government.
+- prior_flights counts strictly earlier records with terminal launch outcomes for
+  the same known, non-placeholder configuration. It is observed history, not a
+  guarantee of lifetime experience. API aggregate totals are not used as predictors
+  because they can include launches after the flight being analyzed.
+- flight_number is missing for unresolved outcomes and same-time ties. Tied
+  timestamps have the same prior_flights count rather than an invented order.
+  experience_order_uncertain flags coarse/missing date precision or timestamp
+  ties; prior_unresolved_records flags earlier unresolved records. Earlier date
+  uncertainty can also affect the true ordering, so inspect the history before SQ3.
+- Terminal outcomes are a working proxy for completed attempts. Ground incidents,
+  test flights, and ambiguous historical entries require review before a final
+  attempt definition is claimed. Scope and historical coverage are team decisions.
+- config_reusable describes the design; reused and launcher_flight_number in the
+  stage table describe a particular piece of hardware. They are not interchangeable.
+- recovery_outcome distinguishes success, failure, not_attempted, and unknown.
+  Missing stage records do not establish that recovery was not attempted. A failed
+  landing does not change the original launch outcome.
+- The master does not decide whether a failure recovered. SQ5 must construct
+  explicit censored observations, define the provider/family grouping, and state
+  its observation cutoff. Multiple family memberships must not double-count launches.
+
+## Quality checks and loading data for analysis
+
+Script 02 writes data/processed/quality_checks/ with missingness, sector/outcome
+counts, yearly counts, records requiring review, and configuration-history coverage.
+Review these before analyzing. A first observed flight later than a stated maiden
+date can indicate missing history; the maiden date itself may also be uncertain.
+
+In a Quarto setup chunk, load the study table with explicit ID and date types:
+
+```r
+packages <- c("here", "readr", "dplyr")
+missing <- packages[!vapply(packages, requireNamespace, logical(1), quietly = TRUE)]
+if (length(missing)) install.packages(missing, repos = "https://cloud.r-project.org")
+
+master <- readr::read_csv(
+  here::here("data", "processed", "combined_launch_tables", "master_launches_2000_2025.csv"),
+  col_types = readr::cols(
+    launch_id = readr::col_character(),
+    provider_id = readr::col_character(),
+    rocket_config_id = readr::col_character(),
+    status_id = readr::col_character(),
+    agency_type_id = readr::col_character(),
+    net = readr::col_datetime(),
+    config_maiden_flight = readr::col_date()
+  ),
+  na = ""
+)
+
+# Validate the unit of analysis before calculating any rates.
+stopifnot(!anyNA(master$launch_id), !anyDuplicated(master$launch_id))
+
+# Keep unknown sectors visible; decide any sector comparison filter explicitly.
+completed <- master |>
+  dplyr::filter(analysis_eligible)
+completed |>
+  dplyr::count(sector, outcome)
+```
+
+Counts are a check, not a finished analysis. Each teammate owns the SQ-specific
+calculations, uncertainty estimates, visualizations, and discussion. Shared data
+preparation stays in the two scripts, so Quarto rendering does not call the API.
