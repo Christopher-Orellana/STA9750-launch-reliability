@@ -39,6 +39,7 @@ Each member can add their own .qmd files and question-specific code within their
 | R/ | Reusable R functions for the whole team. |
 | scripts/ | Shared scripts to download production data and build tables. |
 | data/raw/production/ | Original API responses, separated into launches, agencies, and launcher_configurations. |
+| data/raw/gcat/ | GCAT launch list (J. McDowell), downloaded by script 03 if missing. |
 | data/processed/source_tables/ | Five source tables, two supporting tables, and download/completion records. |
 | data/processed/combined_launch_tables/ | Joined launch tables for full history and the 2000-2025 study window. |
 | data/processed/question_tables/ | Working tables for each person's question. |
@@ -75,9 +76,12 @@ source("scripts/01_pull_data.R")
 
 # Check and join local CSVs, then create the two master launch tables.
 source("scripts/02_build_master_tables.R")
+
+# Download GCAT if missing, then join it to the 2000-2025 master.
+source("scripts/03_join_gcat.R")
 ```
 
-The two source() paths are relative to the open project. Inside the scripts,
+The three source() paths are relative to the open project. Inside the scripts,
 here::here() constructs project-relative paths. No computer-specific paths are used.
 
 For a small test, use the RStudio Terminal:
@@ -152,6 +156,19 @@ data/processed/combined_launch_tables/:
 master_manifest.csv records their checksums and the source manifest checksum.
 The optional failure_evidence.csv and the five SQ working tables are not created
 by this pipeline. The team will build these when their definitions are agreed.
+
+Script 03 checks master_manifest.csv, downloads GCAT if missing, matches each
+LL2 launch to GCAT (exact designator, then same UTC day with one candidate,
+then documented manual matches), and writes these files in
+data/processed/combined_launch_tables/:
+
+- master_launches_2000_2025_gcat.csv: the study-window master with GCAT columns
+  added (launch tag, GCAT outcome, failure code, service code). All LL2 rows are kept.
+- gcat_lookup.csv: one row per matched launch (launch_id to GCAT Launch_Tag).
+- ll2_corrections.csv: LL2 rows dropped or corrected, with the reason.
+
+Manual matches were checked against the 2026-10-24 GCAT snapshot. GCAT data:
+J. McDowell, planet4589.org/space/gcat (CC-BY, credit required).
 
 ## Understanding the joins
 
