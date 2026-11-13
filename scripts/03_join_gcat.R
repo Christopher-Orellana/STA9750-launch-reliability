@@ -180,7 +180,6 @@ match_manual <- tribble(
   "bc6530e6-f53e-4621-8336-3838403737d9", "2025-F07",  "Zhuque-2E",
   "a81fcb21-ed57-47ef-ab57-33ddd9c6ffcd", "2025-F09",  "HANBIT-Nano (same day as Long March 12A)",
   "c7ae20f6-347c-4039-a933-0ed9b28ad4b9", "2025-308",  "Long March 12A; LL2 had this tag on the H3 row by mistake"
-  # Team decision pending: Amos-6 exploded on the pad before launch.
   # GCAT lists it as 2016-E01 (code OE, not counted as a launch attempt).
   # "3622669f-6e06-467a-86f3-47b56b1114c1", "2016-E01", "Falcon 9 Amos-6 pad explosion"
 )
